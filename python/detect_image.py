@@ -1,7 +1,10 @@
 import argparse
+import time
+from pathlib import Path
+
 import numpy as np
 import cv2
-from pathlib import Path
+
 from inference_hailo import HailoInferenceEngine
 from utils import CvUtils
 
@@ -19,6 +22,13 @@ def detect_and_visualize(args):
     print("[Preprocessing...]")
     input_data, orig_size, scale, pad_h, pad_w = CvUtils.preprocess(orig_img, normalize=args.normalize)
     print(f"✓ Preprocessed to: {input_data.shape}, dtype={input_data.dtype}")
+
+    # Run inference
+    print("[Running inference...]")
+    t_start = time.perf_counter()
+    #results = engine.infer(input_data, verbose=args.verbose, save_output=args.save_output, conf_threshold=args.conf_threshold)
+    engine.infer(input_data, verbose=args.verbose, save_output=args.save_output, conf_threshold=args.conf_threshold)
+    total_time = time.perf_counter() - t_start
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Single Image Detection with Hailo-8L + Python Head")

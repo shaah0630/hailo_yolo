@@ -40,6 +40,7 @@ class CvUtils:
         
         resized, scale, pad_w, pad_h = CvUtils.resize_letterbox(img_rgb, target_size)
         
+        # Add Batch dimension: HWC -> NHWC
         if normalize:
             resized = resized.astype(np.float32) / 255.0
             input_tensor = np.expand_dims(resized, axis=0)
