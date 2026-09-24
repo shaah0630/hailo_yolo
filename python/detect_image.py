@@ -8,6 +8,21 @@ import cv2
 from inference_hailo import HailoInferenceEngine
 from utils import CvUtils
 
+def _format_detection_results(detections: list[dict], show_count: int = 10) -> str:
+    """Format detection results for display
+    
+    Args:
+        detections: List of detection dicts
+        show_count: Maximum number to display (None for all)
+    
+    Returns:
+        Formatted string
+    """
+    lines = []
+    for i, det in enumerate(detections[:show_count] if show_count else detections):
+        lines.append(f"  [{i+1}] {det['cls_name']} - conf={det['conf']:.2f}, bbox=[{det['x1']:.0f}, {det['y1']:.0f}, {det['x2']:.0f}, {det['y2']:.0f}]")
+    return '\n'.join(lines)
+
 def detect_and_visualize(args):
     """Run detection on single image using hybrid Hailo + Python head pipeline"""
     print(f"[Loading image: {args.image_path}]")
@@ -20,15 +35,34 @@ def detect_and_visualize(args):
 
     # Preprocess for inference
     print("[Preprocessing...]")
-    input_data, orig_size, scale, pad_h, pad_w = CvUtils.preprocess(orig_img, normalize=args.normalize)
+    input_data, scale, pad_h, pad_w = CvUtils.preprocess(orig_img, normalize=args.normalize)
     print(f"✓ Preprocessed to: {input_data.shape}, dtype={input_data.dtype}")
 
     # Run inference
     print("[Running inference...]")
     t_start = time.perf_counter()
-    #results = engine.infer(input_data, verbose=args.verbose, save_output=args.save_output, conf_threshold=args.conf_threshold)
-    engine.infer(input_data, verbose=args.verbose, save_output=args.save_output, conf_threshold=args.conf_threshold)
+    results = engine.infer(input_data, verbose=args.verbose, save_output=args.save_output, conf_threshold=args.conf_threshold)
     total_time = time.perf_counter() - t_start
+
+    print(f"✓ Inference completed in {total_time*1000:.2f}ms")
+    #print(f"  - Hailo: {stats.hailo_inference_time*1000:.2f}ms")
+    #print(f"  - Python Decode Head: {stats.postprocess_time*1000:.2f}ms")
+    print(f"✓ Found {len(results)} detections above threshold {args.conf_threshold}")
+    print(_format_detection_results(results))
+
+    # Scale detections to original image size
+    results = CvUtils.scale_detections_to_original(results, orig_h, orig_w, scale, pad_w, pad_h)
+
+    # Draw bounding boxes on original image
+    print("[Drawing bounding boxes...]")
+    output_image = CvUtils.draw_bboxes(orig_img, results, thickness=2)
+
+    # Save output image
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(output_path), output_image)
+
+    print(f"✓ Output image saved to: {output_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Single Image Detection with Hailo-8L + Python Head")

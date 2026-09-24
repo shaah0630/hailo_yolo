@@ -1,5 +1,4 @@
 import numpy as np
-from typing import Tuple, Dict, List
 
 from hailo_platform import HEF, VDevice, ConfigureParams, HailoStreamInterface, InferVStreams, InputVStreamParams, OutputVStreamParams, FormatType
 
@@ -25,7 +24,7 @@ class HailoInferenceEngine:
         # Expected shape mapping for data alignment
         # YOLO26 has 6 outputs: 3 output strides x (1 classification + 1 regression)
         # Classification: 80 classes defined by COCO
-        # Regression: 4 coordinates for each bounding box
+        # Box Regression: 4 coordinates for each bounding box
         self.shape_to_name = {
             (1, 80, 80, 80): 'cls_80',
             (1, 40, 40, 80): 'cls_40',
@@ -37,7 +36,7 @@ class HailoInferenceEngine:
 
         print(f"✓ Hailo engine initialized: {hef_path}")
     
-    def infer(self, input_data: np.ndarray, verbose: bool = False, save_output: bool = False, conf_threshold: float = 0.5) -> List[dict]:
+    def infer(self, input_data: np.ndarray, verbose: bool = False, save_output: bool = False, conf_threshold: float = 0.5) -> list[dict]:
         """Run hybrid inference pipeline with Python head"""
 
         if verbose:
@@ -51,8 +50,10 @@ class HailoInferenceEngine:
                 #    print(f"[STAGE 1] Running Hailo backbone...")
                 #t_hailo = time.perf_counter()
                 hailo_output = infer_pipeline.infer(input_data)
-                for name, tensor in hailo_output.items():
-                    print(f"{name}: {tensor.shape}");
+                
+                # DEBUG
+                #for name, tensor in hailo_output.items():
+                #    print(f"{name}: {tensor.shape}");
 
                 #stats.hailo_inference_time = time.perf_counter() - t_hailo
                 #stats.hailo_output_shape = str({k: v.shape for k, v in hailo_results.items()})
@@ -64,7 +65,7 @@ class HailoInferenceEngine:
                 #    print(f"[STAGE 2] Running Python Head...")
                 #t_post = time.perf_counter()
                 
-                results = self._decode_yolo26_one2one_head(hailo_output, conf_threshold)
+                detections = self._decode_yolo26_one2one_head(hailo_output, conf_threshold)
                 #stats.postprocess_time = time.perf_counter() - t_post
                 #stats.final_output_shape = f"{len(detections)} detections"
                 #if verbose:
@@ -78,9 +79,9 @@ class HailoInferenceEngine:
         #    print(f"  PyHead:  {stats.postprocess_time*1000:7.2f}ms")
         #    print(f"  Total:   {stats.total_time*1000:7.2f}ms")
         
-        #return detections
+        return detections
     
-    def _decode_yolo26_one2one_head(self, dequantized_results: Dict, conf_threshold: float, multi_label: bool = True) -> List[dict]:
+    def _decode_yolo26_one2one_head(self, dequantized_results: dict, conf_threshold: float, multi_label: bool = True) -> list[dict]:
         # Map dequantized results to named tensors
         tensors = {}
         found_shapes = []

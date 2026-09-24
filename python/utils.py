@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 from enum import IntEnum
-from typing import Dict, Tuple, List, Final
+from typing import Final
 
 # Constant value
 COLOR_GRAY: Final = 114
@@ -20,7 +20,7 @@ class CvUtils:
         return img
 
     @staticmethod
-    def preprocess(img: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = False) -> Tuple[np.ndarray, Tuple[int, int], float, int, int]:
+    def preprocess(img: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = False) -> tuple[np.ndarray, float, int, int]:
         """Load and preprocess image for inference
         
         Args:
@@ -35,9 +35,6 @@ class CvUtils:
         # YOLO models expect RGB, but cv2.imread loads as BGR, so convert
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
-        # Dimension order: HWC
-        orig_h, orig_w = img_rgb.shape[:2]
-        
         resized, scale, pad_w, pad_h = CvUtils.resize_letterbox(img_rgb, target_size)
         
         # Add Batch dimension: HWC -> NHWC
@@ -47,7 +44,7 @@ class CvUtils:
         else:
             input_tensor = np.expand_dims(resized, axis=0).astype(np.uint8)
         
-        return input_tensor, (orig_w, orig_h), scale, pad_w, pad_h
+        return input_tensor, scale, pad_w, pad_h
 
     @staticmethod
     def resize_letterbox(img, target_size, color=(COLOR_GRAY, COLOR_GRAY, COLOR_GRAY)):
@@ -68,3 +65,45 @@ class CvUtils:
         padded[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = resized
         
         return padded, scale, pad_w, pad_h
+    
+    @staticmethod
+    def scale_detections_to_original(detections: list[dict], orig_h: int, orig_w: int, scale: float, pad_w: int, pad_h: int) -> list[dict]:
+        """Scale detection coordinates from inference space (640x640) to original image space
+        
+        Args:
+            detections: List of detection dicts with x1, y1, x2, y2 coordinates
+            orig_h, orig_w: Original image dimensions
+            scale: Scale factor used in preprocessing
+            pad_w, pad_h: Padding used in preprocessing
+        """
+        for det in detections:
+            # 1. Reverse padding, 2. Reverse scaling
+            det['x1'] = max(0, min((det['x1'] - pad_w) / scale, orig_w))
+            det['y1'] = max(0, min((det['y1'] - pad_h) / scale, orig_h))
+            det['x2'] = max(0, min((det['x2'] - pad_w) / scale, orig_w))
+            det['y2'] = max(0, min((det['y2'] - pad_h) / scale, orig_h))
+            
+        return detections
+    
+    @staticmethod
+    def draw_bboxes(img: np.ndarray, detections: list, thickness: int = 2) -> np.ndarray:
+        """Draw bounding boxes on image"""
+        img = img.copy()
+        h, w = img.shape[:2]
+
+        # Prepare some different colors
+        colors = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255)]
+
+        for i, det in enumerate(detections):
+            x1 = int(max(0, det['x1']))
+            y1 = int(max(0, det['y1']))
+            x2 = int(min(w, det['x2']))
+            y2 = int(min(h, det['y2']))
+            
+            color = colors[i % len(colors)]
+            cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
+            
+            label = f"{det['cls_name']} {det['conf']:.2f}"
+            cv2.putText(img, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        
+        return img
