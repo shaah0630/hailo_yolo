@@ -1,12 +1,19 @@
 import numpy as np
-
+import cv2
 from hailo_platform import HEF, VDevice, ConfigureParams, HailoStreamInterface, InferVStreams, InputVStreamParams, OutputVStreamParams, FormatType
+
+from inference.base import InferenceEngineBase
+from utils import CvUtils
+from enum import IntEnum
+
+class ModelInputSize(IntEnum):
+    YOLO26 = 640
 
 def sigmoid(x: np.ndarray) -> np.ndarray:
     """Vectorized sigmoid"""
     return 1.0 / (1.0 + np.exp(-x))
 
-class HailoInferenceEngine:
+class HailoInferenceEngine(InferenceEngineBase):
     """Encapsulates Hailo-8L backbone + Python head inference"""
     
     def __init__(self, hef_path: str):
@@ -35,6 +42,32 @@ class HailoInferenceEngine:
         }
 
         print(f"✓ Hailo engine initialized: {hef_path}")
+    
+    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = False) -> tuple[np.ndarray, float, int, int]:
+        """Load and preprocess image for inference
+        
+        Args:
+            img: Loaded image as NumPy array, default in BGR order by cv2.imread()
+            target_size: Target size for inference (default 640x640)
+            normalize: If True, normalize to [0,1]; if False, keep as uint8 [0,255]
+        
+        Returns:
+            (input_tensor, original_size, scale, pad_w, pad_h)
+        """
+        # Convert color channel order
+        # YOLO models expect RGB, but cv2.imread loads as BGR, so convert
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        
+        resized, scale, pad_w, pad_h = CvUtils.resize_letterbox(img_rgb, target_size)
+        
+        # Add Batch dimension: HWC -> NHWC
+        if normalize:
+            resized = resized.astype(np.float32) / 255.0
+            input_tensor = np.expand_dims(resized, axis=0)
+        else:
+            input_tensor = np.expand_dims(resized, axis=0).astype(np.uint8)
+        
+        return input_tensor, scale, pad_w, pad_h
     
     def infer(self, input_data: np.ndarray, verbose: bool = False, save_output: bool = False, conf_threshold: float = 0.5) -> list[dict]:
         """Run hybrid inference pipeline with Python head"""

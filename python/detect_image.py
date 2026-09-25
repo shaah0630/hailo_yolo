@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import cv2
 
-from inference_hailo import HailoInferenceEngine
+from inference.hailo import HailoInferenceEngine
 from utils import CvUtils
 
 def _format_detection_results(detections: list[dict], show_count: int = 10) -> str:
@@ -23,10 +23,15 @@ def _format_detection_results(detections: list[dict], show_count: int = 10) -> s
         lines.append(f"  [{i+1}] {det['cls_name']} - conf={det['conf']:.2f}, bbox=[{det['x1']:.0f}, {det['y1']:.0f}, {det['x2']:.0f}, {det['y2']:.0f}]")
     return '\n'.join(lines)
 
-def detect_and_visualize(args):
+def main(args):
     """Run detection on single image using hybrid Hailo + Python head pipeline"""
     print(f"[Loading image: {args.image_path}]")
-    engine = HailoInferenceEngine(args.hef)
+
+    #if args.inf_type == "hailo":
+    engine = HailoInferenceEngine(args.model_path)
+    #else:
+        # Default use ONNX Runtime for inference
+        #engine = OrtInferenceEngine(args.model_path)
 
     # Load original image
     orig_img = CvUtils.load_image(args.image_path)
@@ -35,7 +40,7 @@ def detect_and_visualize(args):
 
     # Preprocess for inference
     print("[Preprocessing...]")
-    input_data, scale, pad_h, pad_w = CvUtils.preprocess(orig_img, normalize=args.normalize)
+    input_data, scale, pad_h, pad_w = engine.preprocess(orig_img, normalize=args.normalize)
     print(f"✓ Preprocessed to: {input_data.shape}, dtype={input_data.dtype}")
 
     # Run inference
@@ -67,7 +72,8 @@ def detect_and_visualize(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Single Image Detection with Hailo-8L + Python Head")
     parser.add_argument("image_path", type=str, help="Input image path")
-    parser.add_argument("--hef", type=str, default="../models/yolo26n.hef", help="Path to HEF model")
+    parser.add_argument("--inf-eng", type=str, default="ort", help="Inference by Hailo or ONNX Runtime")
+    parser.add_argument("--model-path", type=str, default="../models/yolo26n.hef", help="Path to HEF/ONNX model")
     parser.add_argument("--output", type=str, default="output_detected.jpg", help="Output image path")
     parser.add_argument("--conf-threshold", type=float, default=0.25, help="Confidence threshold")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
@@ -81,4 +87,4 @@ if __name__ == "__main__":
         print(f"Error: Image is not found: {args.image_path}")
         exit(1)
     
-    detect_and_visualize(args)
+    main(args)

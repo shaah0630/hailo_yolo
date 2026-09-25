@@ -1,4 +1,4 @@
-import NumPy as np
+import numpy as np
 from abc import ABC, abstractmethod
 
 class InferenceEngineBase(ABC):
@@ -6,6 +6,6 @@ class InferenceEngineBase(ABC):
     def preprocess(self, img: np.ndarray, target_size: int):
         pass
     
-    @abstractmethod
-    def postprocess(self):
-        pass
+    #@abstractmethod
+    #def postprocess(self):
+    #    pass
