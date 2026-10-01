@@ -6,7 +6,8 @@ import numpy as np
 import cv2
 
 from inference.hailo import HailoInferenceEngine
-from utils import CvUtils
+from inference.ort import OrtInferenceEngine
+from utils import CvUtils, COCO_CLASSES
 
 def _format_detection_results(detections: list[dict], show_count: int = 10) -> str:
     """Format detection results for display
@@ -18,20 +19,22 @@ def _format_detection_results(detections: list[dict], show_count: int = 10) -> s
     Returns:
         Formatted string
     """
+
     lines = []
     for i, det in enumerate(detections[:show_count] if show_count else detections):
-        lines.append(f"  [{i+1}] {det['cls_name']} - conf={det['conf']:.2f}, bbox=[{det['x1']:.0f}, {det['y1']:.0f}, {det['x2']:.0f}, {det['y2']:.0f}]")
+        lines.append(f"  [{i+1}] {COCO_CLASSES[det['cls_id']]} - conf={det['conf']:.2f}, bbox=[{det['x1']:.0f}, {det['y1']:.0f}, {det['x2']:.0f}, {det['y2']:.0f}]")
+
     return '\n'.join(lines)
 
 def main(args):
     """Run detection on single image using hybrid Hailo + Python head pipeline"""
     print(f"[Loading image: {args.image_path}]")
 
-    #if args.inf_type == "hailo":
-    engine = HailoInferenceEngine(args.model_path)
-    #else:
+    if args.inf_eng == "hailo":
+        engine = HailoInferenceEngine(args.model_path)
+    else:
         # Default use ONNX Runtime for inference
-        #engine = OrtInferenceEngine(args.model_path)
+        engine = OrtInferenceEngine(args.model_path)
 
     # Load original image
     orig_img = CvUtils.load_image(args.image_path)
@@ -51,8 +54,7 @@ def main(args):
 
     print(f"✓ Inference completed in {total_time*1000:.2f}ms")
     #print(f"  - Hailo: {stats.hailo_inference_time*1000:.2f}ms")
-    #print(f"  - Python Decode Head: {stats.postprocess_time*1000:.2f}ms")
-    print(f"✓ Found {len(results)} detections above threshold {args.conf_threshold}")
+
     print(_format_detection_results(results))
 
     # Scale detections to original image size

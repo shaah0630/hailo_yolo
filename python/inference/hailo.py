@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+import time
 from hailo_platform import HEF, VDevice, ConfigureParams, HailoStreamInterface, InferVStreams, InputVStreamParams, OutputVStreamParams, FormatType
 
 from inference.base import InferenceEngineBase
@@ -12,7 +13,7 @@ class ModelInputSize(IntEnum):
 def sigmoid(x: np.ndarray) -> np.ndarray:
     """Vectorized sigmoid"""
     return 1.0 / (1.0 + np.exp(-x))
-
+    
 class HailoInferenceEngine(InferenceEngineBase):
     """Encapsulates Hailo-8L backbone + Python head inference"""
     
@@ -70,7 +71,14 @@ class HailoInferenceEngine(InferenceEngineBase):
         return input_tensor, scale, pad_w, pad_h
     
     def infer(self, input_data: np.ndarray, verbose: bool = False, save_output: bool = False, conf_threshold: float = 0.5) -> list[dict]:
-        """Run hybrid inference pipeline with Python head"""
+        """Run inference pipeline by Hailo NPU
+
+        Execute inference session via HailoRT.
+        Decoding one-to-one head to detection bounding boxes will be handled in postprocess.
+
+        Returns:
+            bboxes: Bounding boxes whose confidence scores are above threshold
+        """
 
         if verbose:
             print(f"[INFERENCE] Input shape: {input_data.shape}, dtype: {input_data.dtype}")
@@ -79,10 +87,10 @@ class HailoInferenceEngine(InferenceEngineBase):
             with InferVStreams(self.network_group, self.input_vstream_params, self.output_vstream_params) as infer_pipeline:
                 
                 # A. Hailo Backbone Inference
-                #if verbose:
-                #    print(f"[STAGE 1] Running Hailo backbone...")
+                if verbose:
+                    print(f"[STAGE 1] Running Hailo backbone...")
                 #t_hailo = time.perf_counter()
-                hailo_output = infer_pipeline.infer(input_data)
+                dequantized_outputs = infer_pipeline.infer(input_data)
                 
                 # DEBUG
                 #for name, tensor in hailo_output.items():
@@ -93,12 +101,12 @@ class HailoInferenceEngine(InferenceEngineBase):
                 #if verbose:
                 #    print(f"  ✓ Hailo inference: {stats.hailo_inference_time*1000:.2f}ms")
 
-                # B. Python Head
-                #if verbose:
-                #    print(f"[STAGE 2] Running Python Head...")
+                # B. Decode one-to-one head
+                if verbose:
+                   print(f"[STAGE 2] Decode one-to-one head...")
                 #t_post = time.perf_counter()
                 
-                detections = self._decode_yolo26_one2one_head(hailo_output, conf_threshold)
+                bboxes = self._postprocess(dequantized_outputs, conf_threshold)
                 #stats.postprocess_time = time.perf_counter() - t_post
                 #stats.final_output_shape = f"{len(detections)} detections"
                 #if verbose:
@@ -109,12 +117,18 @@ class HailoInferenceEngine(InferenceEngineBase):
         #if verbose:
         #    print(f"[SUMMARY] Pipeline timing:")
         #    print(f"  Hailo:   {stats.hailo_inference_time*1000:7.2f}ms")
-        #    print(f"  PyHead:  {stats.postprocess_time*1000:7.2f}ms")
+        #    print(f"  DecodeHead:  {stats.postprocess_time*1000:7.2f}ms")
         #    print(f"  Total:   {stats.total_time*1000:7.2f}ms")
         
-        return detections
+        return bboxes
     
-    def _decode_yolo26_one2one_head(self, dequantized_results: dict, conf_threshold: float, multi_label: bool = True) -> list[dict]:
+    def _postprocess(self, dequantized_results: dict, conf_threshold: float, multi_label: bool = True) -> list[dict]:
+        """Decode YOLO26 one-to-one head and filter the results by confidence score threshold
+        
+        Returns:
+            bboxes: list[dict], (x1, y1, x2, y2, confidence, class)
+        """
+
         # Map dequantized results to named tensors
         tensors = {}
         found_shapes = []
@@ -138,8 +152,7 @@ class HailoInferenceEngine(InferenceEngineBase):
         # Convert confidence threshold to logit space (inverse sigmoid)
         logit_threshold = -np.log(1.0 / conf_threshold - 1.0)
 
-        results = []
-        coco_classes = DetectionPostProcessor.get_coco_classes()
+        bboxes = []
 
         for i in range(len(STRIDES)):
             stride = STRIDES[i]
@@ -195,39 +208,13 @@ class HailoInferenceEngine(InferenceEngineBase):
             
             for j in range(len(anchor_indices)):
                 # Not scaled to original aspect ratio yet, keep floating precision here
-                results.append({
+                bboxes.append({
                     'x1': round(float(x1[j]), 2),
                     'y1': round(float(y1[j]), 2),
                     'x2': round(float(x2[j]), 2),
                     'y2': round(float(y2[j]), 2),
                     'conf': round(float(scores[j]), 4),
                     'cls_id': class_ids[j],
-                    'cls_name': coco_classes.get(class_ids[j], 'N/A')
                 })
 
-        return results
-
-class DetectionPostProcessor:
-    """Postprocess detections and draw bboxes using YOLO COCO classes"""
-    
-    _COCO_CLASSES = None
-    
-    @classmethod
-    def get_coco_classes(cls):
-        """Return COCO class names (hardcoded to avoid dependencies)"""
-        if cls._COCO_CLASSES is not None:
-            return cls._COCO_CLASSES
-        
-        # Standard COCO 80 classes
-        cls._COCO_CLASSES = {
-            0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'airplane', 5: 'bus', 6: 'train', 7: 'truck', 8: 'boat', 9: 'traffic light',
-            10: 'fire hydrant', 11: 'stop sign', 12: 'parking meter', 13: 'bench', 14: 'bird', 15: 'cat', 16: 'dog', 17: 'horse', 18: 'sheep', 19: 'cow',
-            20: 'elephant', 21: 'bear', 22: 'zebra', 23: 'giraffe', 24: 'backpack', 25: 'umbrella', 26: 'handbag', 27: 'tie', 28: 'suitcase', 29: 'frisbee',
-            30: 'skis', 31: 'snowboard', 32: 'sports ball', 33: 'kite', 34: 'baseball bat', 35: 'baseball glove', 36: 'skateboard', 37: 'surfboard', 38: 'tennis racket', 39: 'bottle',
-            40: 'wine glass', 41: 'cup', 42: 'fork', 43: 'knife', 44: 'spoon', 45: 'bowl', 46: 'banana', 47: 'apple', 48: 'sandwich', 49: 'orange',
-            50: 'broccoli', 51: 'carrot', 52: 'hot dog', 53: 'pizza', 54: 'donut', 55: 'cake', 56: 'chair', 57: 'couch', 58: 'potted plant', 59: 'bed',
-            60: 'dining table', 61: 'toilet', 62: 'tv', 63: 'laptop', 64: 'mouse', 65: 'remote', 66: 'keyboard', 67: 'cell phone', 68: 'microwave', 69: 'oven',
-            70: 'toaster', 71: 'sink', 72: 'refrigerator', 73: 'book', 74: 'clock', 75: 'vase', 76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'
-        }
-        
-        return cls._COCO_CLASSES
+        return bboxes
