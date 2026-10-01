@@ -32,6 +32,7 @@ class CvUtils:
     def resize_letterbox(img, target_size, color=(COLOR_GRAY, COLOR_GRAY, COLOR_GRAY)):
         """Resize image with aspect ratio preservation (letterbox)"""
         h, w = img.shape[:2]
+        # TODO: add comment of how scale is determined
         scale = min(target_size / h, target_size / w)
         new_w = round(w * scale)
         new_h = round(h * scale)

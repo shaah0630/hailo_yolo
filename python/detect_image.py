@@ -9,11 +9,11 @@ from inference.hailo import HailoInferenceEngine
 from inference.ort import OrtInferenceEngine
 from utils import CvUtils, COCO_CLASSES
 
-def _format_detection_results(detections: list[dict], show_count: int = 10) -> str:
+def _format_detection_results(bboxes: list[dict], show_count: int = 10) -> str:
     """Format detection results for display
     
     Args:
-        detections: List of detection dicts
+        bboxes: List of detection dicts
         show_count: Maximum number to display (None for all)
     
     Returns:
@@ -21,8 +21,8 @@ def _format_detection_results(detections: list[dict], show_count: int = 10) -> s
     """
 
     lines = []
-    for i, det in enumerate(detections[:show_count] if show_count else detections):
-        lines.append(f"  [{i+1}] {COCO_CLASSES[det['cls_id']]} - conf={det['conf']:.2f}, bbox=[{det['x1']:.0f}, {det['y1']:.0f}, {det['x2']:.0f}, {det['y2']:.0f}]")
+    for i, bbox in enumerate(bboxes[:show_count] if show_count else bboxes):
+        lines.append(f"  [{i+1}] {COCO_CLASSES[bbox['cls_id']]} - conf={bbox['conf']:.2f}, bbox=[{bbox['x1']:.2f}, {bbox['y1']:.2f}, {bbox['x2']:.2f}, {bbox['y2']:.2f}]")
 
     return '\n'.join(lines)
 
@@ -43,8 +43,11 @@ def main(args):
 
     # Preprocess for inference
     print("[Preprocessing...]")
-    input_data, scale, pad_h, pad_w = engine.preprocess(orig_img, normalize=args.normalize)
+    input_data, scale, pad_w, pad_h = engine.preprocess(orig_img, normalize=args.normalize)
     print(f"✓ Preprocessed to: {input_data.shape}, dtype={input_data.dtype}")
+
+    # DEBUG
+    #print(f"scale: {scale: .2f}, pad_h: {pad_h: .2f}, pad_w: {pad_w: .2f}")
 
     # Run inference
     print("[Running inference...]")
@@ -55,10 +58,13 @@ def main(args):
     print(f"✓ Inference completed in {total_time*1000:.2f}ms")
     #print(f"  - Hailo: {stats.hailo_inference_time*1000:.2f}ms")
 
+    print(f"✓ Found {len(results)} detections above threshold {args.conf_threshold}")
     print(_format_detection_results(results))
 
     # Scale detections to original image size
     results = CvUtils.scale_detections_to_original(results, orig_h, orig_w, scale, pad_w, pad_h)
+    # print(f"DEBUG: Original aspect ratio:")
+    # print(_format_detection_results(results))
 
     # Draw bounding boxes on original image
     print("[Drawing bounding boxes...]")
@@ -77,7 +83,7 @@ if __name__ == "__main__":
     parser.add_argument("--inf-eng", type=str, default="ort", help="Inference by Hailo or ONNX Runtime")
     parser.add_argument("--model-path", type=str, default="../models/yolo26n.hef", help="Path to HEF/ONNX model")
     parser.add_argument("--output", type=str, default="output_detected.jpg", help="Output image path")
-    parser.add_argument("--conf-threshold", type=float, default=0.25, help="Confidence threshold")
+    parser.add_argument("--conf-threshold", type=float, default=0.5, help="Confidence threshold")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--normalize", action="store_true", help="Normalize input to [0,1] (default: uint8 [0,255] for HEF)")
     parser.add_argument("--save-output", action="store_true", help="Save intermediate outputs as .npy files")

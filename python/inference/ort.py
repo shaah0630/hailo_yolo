@@ -25,7 +25,7 @@ class OrtInferenceEngine(InferenceEngineBase):
         # print(f"DEBUG: input_name = {self.input_name}")
         # print(f"DEBUG: output_name = {self.output_name}")
 
-    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = False) -> tuple[np.ndarray, float, int, int]:
+    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = True) -> tuple[np.ndarray, float, int, int]:
         """"""
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         # Resize as a letterbox
