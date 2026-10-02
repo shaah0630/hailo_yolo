@@ -208,13 +208,14 @@ class HailoInferenceEngine(InferenceEngineBase):
             
             for j in range(len(anchor_indices)):
                 # Not scaled to original aspect ratio yet, keep floating precision here
+                # TODO: will round() cause precision loss?
                 bboxes.append({
                     'x1': round(float(x1[j]), 2),
                     'y1': round(float(y1[j]), 2),
                     'x2': round(float(x2[j]), 2),
                     'y2': round(float(y2[j]), 2),
                     'conf': round(float(scores[j]), 4),
-                    'cls_id': class_ids[j],
+                    'cls_id': int(class_ids[j]),    # Typecast to int for easier JSON dump
                 })
 
         return bboxes

@@ -25,7 +25,7 @@ class OrtInferenceEngine(InferenceEngineBase):
         # print(f"DEBUG: input_name = {self.input_name}")
         # print(f"DEBUG: output_name = {self.output_name}")
 
-    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = True) -> tuple[np.ndarray, float, int, int]:
+    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26) -> tuple[np.ndarray, float, int, int]:
         """"""
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         # Resize as a letterbox
@@ -78,6 +78,7 @@ class OrtInferenceEngine(InferenceEngineBase):
                 continue
             
             # Not scaled to original aspect ratio yet, keep floating precision here
+            # TODO: will round() cause precision loss?
             bboxes.append({
                 'x1': round(float(x1), 2),
                 'y1': round(float(y1), 2),
