@@ -28,7 +28,7 @@ def _format_detection_results(bboxes: list[dict], show_count: int = 10) -> str:
 
     return '\n'.join(lines)
 
-def object_detect_image(engine: InferenceEngineBase, img_path: str, conf_threshold: float, verbose: bool = False, debug: bool = False) -> tuple[np.ndarray, list[dict]]:
+def image_object_detect(engine: InferenceEngineBase, img_path: str, conf_threshold: float, verbose: bool = False, debug: bool = False) -> tuple[np.ndarray, int, list[dict]]:
     # Load original image
     print(f"[Loading image: {img_path}]")
     orig_img = CvUtils.load_image(img_path)
@@ -66,12 +66,38 @@ def object_detect_image(engine: InferenceEngineBase, img_path: str, conf_thresho
         print(f"[DEBUG] Reversed to original aspect ratio:")
         print(_format_detection_results(results))
     
-    return orig_img, results
+    # This is for COCO result format
+    img_id = int(Path(img_path).stem)
+    
+    return orig_img, img_id, results
 
-def detect_single_image(engine: InferenceEngineBase, img_path: str, conf_threshold: float, output: str, output_json: bool, verbose: bool = False, debug: bool = False):
+def _bboxes_to_coco_json(img_id: int, bboxes: list[dict]) -> list[dict]:
+    json_data = []
+
+    for b in bboxes:
+            # For detection with bounding boxes, please use the following format:
+            # [{
+            #   "image_id": int,
+            #   "category_id": int,
+            #   "bbox": [x,y,width,height],
+            #   "score": float,
+            # }]
+            json_data.append({"image_id": img_id,
+                              "category_id": int(b['cls_id']),
+                              "bbox": [b['x1'], b['y1'], b['x2'] - b['x1'], b['y2'] - b['y1']],
+                              "score": b['conf']})
+    
+    return json_data
+
+def _dump_json_to_file(json_data: list[dict], json_path: str):
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(json_data, f)
+        print(f"✓ Output JSON saved to: {json_path}")
+
+def detect_single_image(engine: InferenceEngineBase, img_path: str, conf_threshold: float, output: str, output_json: bool, verbose: bool, debug: bool):
     """Run object detection on single image"""
 
-    orig_img, bboxes = object_detect_image(engine, img_path, conf_threshold=conf_threshold, verbose=verbose, debug=debug)
+    orig_img, img_id, bboxes = image_object_detect(engine, img_path, conf_threshold, verbose, debug)
 
     if not output_json:
         # Draw bounding boxes on original image
@@ -85,33 +111,31 @@ def detect_single_image(engine: InferenceEngineBase, img_path: str, conf_thresho
 
         print(f"✓ Output image saved to: {output_path}")
     else:
-        # Save output to JSON format
-        image_id = int(Path(img_path).stem)
-        json_data = []
+        _dump_json_to_file(_bboxes_to_coco_json(img_id, bboxes), output)
 
-        for b in bboxes:
-            # For detection with bounding boxes, please use the following format:
-            # [{
-            #   "image_id": int,
-            #   "category_id": int,
-            #   "bbox": [x,y,width,height],
-            #   "score": float,
-            # }]
-            json_data.append({"image_id": image_id,
-                              "category_id": int(b['cls_id']),
-                              "bbox": [b['x1'], b['y1'], b['x2'] - b['x1'], b['y2'] - b['y1']],
-                              "score": b['conf']})
-            
-        print(f"DEBUG: {json_data}")
-        
-        json_path = Path(img_path).with_suffix(".json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(json_data, f)
-            print(f"✓ Output JSON saved to: {json_path}")
+def detect_batch_images(engine: InferenceEngineBase, img_dir: str, conf_threshold: float, json_path: str, verbose: bool = False, debug: bool = False):
+    # Check if img_dir is a directory
+    dir = Path(img_dir)
+    if not dir.is_dir():
+        raise NotADirectoryError(f"Specified path is not a valid directory: {img_dir}")
+    
+    valid_extensions = {".jpg", ".jpeg", ".png"}
+    
+    # Collect all file names in the directory
+    filenames = [
+                 f.name for f in dir.iterdir() 
+                 if f.is_file() and f.suffix.lower() in valid_extensions
+                ]
 
-def detect_batch_images(engine: InferenceEngineBase, img_dir: str, conf_threshold: float, output: str, verbose: bool = False, debug: bool = False):
-    # dir = Path(img_dir)
-    pass
+    json_data = []
+    for fn in filenames:
+        # Run inference for each image in the directory
+        img_path = img_dir + "/" + fn
+        print(f"DEBUG: {img_path}")
+        # _, img_id, bboxes = image_object_detect(engine, img_path, conf_threshold, verbose, debug)    
+        # json_data += _bboxes_to_coco_json(img_id, bboxes)
+    
+    # _dump_json_to_file(json_data, json_path)
 
 def main(args):
     """Run detection on single image using hybrid Hailo + Python head pipeline"""
@@ -123,20 +147,33 @@ def main(args):
         # Default use ONNX Runtime for inference
         engine = OrtInferenceEngine(args.model_path)
 
+    output = args.output
+    if args.output_json:
+        # Ignore --output argument, forced to save output JSON file in output/
+        json_dir = str(Path(__file__).resolve().parent) + "/output"
+        # Create output directory if it doesn't exist
+        Path(json_dir).mkdir(parents=True, exist_ok=True)
+        output = json_dir + "/coco_results_for_eval.json"
+
     if args.batch:
-        detect_batch_images(engine, args.image_path, args.conf_threshold, args.output, args.verbose, args.debug)
+        detect_batch_images(engine,
+                            args.image_path,
+                            args.conf_threshold,
+                            output,
+                            args.verbose,
+                            args.debug)
     else:
         detect_single_image(engine,
                             args.image_path,
                             args.conf_threshold,
-                            args.output,
+                            output,
                             args.output_json,
                             args.verbose,
-                            args.debug)    
+                            args.debug)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Single Image Detection with Hailo-8L + Python Head")
-    parser.add_argument("image_path", type=str, help="Input image path, should be a directory in batch mode")
+    parser.add_argument("image_path", type=str, help="Input image path, would be assumed as a directory in batch mode")
     parser.add_argument("--inf-eng", type=str, default="ort", help="Inference by Hailo or ONNX Runtime")
     parser.add_argument("--model-path", type=str, default="../models/yolo26n.hef", help="Path to HEF/ONNX model")
     parser.add_argument("--output", type=str, default="output_detected.jpg", help="Output image path")
@@ -152,7 +189,7 @@ if __name__ == "__main__":
     
     # Validate input
     if not Path(args.image_path).exists():
-        print(f"Error: Image is not found: {args.image_path}")
+        print(f"Error: Image file or directory is not found: {args.image_path}")
         exit(1)
     
     main(args)
