@@ -52,12 +52,14 @@ def image_object_detect(engine: InferenceEngineBase, img_path: str, conf_thresho
     print(f"✓ Original image size: {orig_w}x{orig_h}")
 
     # Preprocess for inference
-    print("[Preprocessing...]")
+    if verbose:
+        print("[Preprocessing...]")
+
     input_data, scale, pad_w, pad_h = engine.preprocess(orig_img, normalize=args.normalize)
-    print(f"✓ Preprocessed to: {input_data.shape}, dtype={input_data.dtype}")
 
     if debug:
-        print(f"scale: {scale: .2f}, pad_h: {pad_h: .2f}, pad_w: {pad_w: .2f}")
+        print(f"[DEBUG] Preprocessed to: {input_data.shape}, dtype={input_data.dtype}")
+        print(f"        scale: {scale: .2f}, pad_h: {pad_h: .2f}, pad_w: {pad_w: .2f}")
 
     # Run inference
     print("[Running inference...]")
@@ -69,20 +71,20 @@ def image_object_detect(engine: InferenceEngineBase, img_path: str, conf_thresho
         print(f"✓ Inference completed in {total_time*1000:.2f}ms")
         #print(f"  - Hailo: {stats.hailo_inference_time*1000:.2f}ms")
 
-        print(f"✓ Found {len(results)} detections above threshold {args.conf_threshold}")
+        print(f"✓ Found {len(results)} detections above threshold {conf_threshold}")
 
-    if args.debug:
+    if debug:
         print(f"[DEBUG] Target aspect ratio:")
         print(_format_detection_results(results))
 
     # Scale detections to original image size
     results = CvUtils.scale_detections_to_original(results, orig_h, orig_w, scale, pad_w, pad_h)
     
-    if args.debug:
+    if debug:
         print(f"[DEBUG] Reversed to original aspect ratio:")
         print(_format_detection_results(results))
     
-    # This is for COCO result format
+    # For COCO result format
     img_id = int(Path(img_path).stem)
     
     return orig_img, img_id, results
