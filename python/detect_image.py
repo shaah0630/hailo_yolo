@@ -13,6 +13,20 @@ from utils import CvUtils, COCO_CLASSES
 
 g_output_dir = str()
 
+# Mapping from YOLO Model Class Index (0-79) to COCO Category ID (1-90)
+# This mapping is derived from standard YOLOv8/v5 coco.yaml and COCO 2017 dataset.
+# Based on: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/coco.yaml
+# And standard COCO IDs.
+COCO_CATEGORY_IDS = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 
+    11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 
+    22, 23, 24, 25, 27, 28, 31, 32, 33, 34, 
+    35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 
+    46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 
+    56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 
+    67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 
+    80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
+
 def _format_detection_results(bboxes: list[dict], show_count: int = 10) -> str:
     """Format detection results for display
     
@@ -77,6 +91,7 @@ def _bboxes_to_coco_json(img_id: int, bboxes: list[dict]) -> list[dict]:
     json_data = []
 
     for b in bboxes:
+            # According to the description in https://cocodataset.org/#format-results:
             # For detection with bounding boxes, please use the following format:
             # [{
             #   "image_id": int,
@@ -85,7 +100,7 @@ def _bboxes_to_coco_json(img_id: int, bboxes: list[dict]) -> list[dict]:
             #   "score": float,
             # }]
             json_data.append({"image_id": img_id,
-                              "category_id": int(b['cls_id']),
+                              "category_id": int(COCO_CATEGORY_IDS[b['cls_id']]),
                               "bbox": [b['x1'], b['y1'], b['x2'] - b['x1'], b['y2'] - b['y1']],
                               "score": b['conf']})
     
