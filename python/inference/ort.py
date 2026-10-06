@@ -25,7 +25,7 @@ class OrtInferenceEngine(InferenceEngineBase):
         # print(f"DEBUG: input_name = {self.input_name}")
         # print(f"DEBUG: output_name = {self.output_name}")
 
-    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26) -> tuple[np.ndarray, float, int, int]:
+    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = True) -> tuple[np.ndarray, float, int, int]:
         """"""
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         # Resize as a letterbox
@@ -85,7 +85,7 @@ class OrtInferenceEngine(InferenceEngineBase):
                 'x2': round(float(x2), 2),
                 'y2': round(float(y2), 2),
                 'conf': round(float(conf), 4),
-                'cls_id': cls_id,
+                'cls_id': int(round(cls_id)),
             })
             
         print(f"Found {len(bboxes)} detections.")

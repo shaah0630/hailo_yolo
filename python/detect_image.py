@@ -162,7 +162,6 @@ def detect_batch_images(engine: InferenceEngineBase,
     for fn in filenames:
         # Run inference for each image in the directory
         img_path = img_dir + "/" + fn
-        print(f"DEBUG: {img_path}")
         _, img_id, bboxes = image_object_detect(engine, img_path, conf_threshold, verbose, debug)    
         json_data += _bboxes_to_coco_json(img_id, bboxes)
     
