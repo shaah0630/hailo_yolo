@@ -44,7 +44,14 @@ def _format_detection_results(bboxes: list[dict], show_count: int = 10) -> str:
 
     return '\n'.join(lines)
 
-def image_object_detect(engine: InferenceEngineBase, img: np.ndarray, conf_threshold: float, verbose: bool = False, debug: bool = False) -> tuple[list[dict], InferenceTimeStats]:
+def image_object_detect(
+    engine: InferenceEngineBase,
+    img: np.ndarray,
+    conf_threshold: float,
+    normalize: bool = False,
+    verbose: bool = False,
+    debug: bool = False,
+) -> tuple[list[dict], InferenceTimeStats]:
     stats = InferenceTimeStats()
 
     orig_h, orig_w = img.shape[:2]
@@ -172,7 +179,7 @@ def detect_batch_images(engine: InferenceEngineBase,
         # Run inference for each image in the directory
         img_path = img_dir + "/" + fn
         img = CvUtils.load_image(img_path)
-        bboxes, stats = image_object_detect(engine, img, conf_threshold, verbose, debug)    
+        bboxes, _ = image_object_detect(engine, img, conf_threshold, verbose, debug)    
         
         img_id = int(Path(fn).stem)
         json_data += _bboxes_to_coco_json(img_id, bboxes)

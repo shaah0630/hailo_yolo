@@ -21,7 +21,7 @@ class InferenceTimeStats:
 
 class InferenceEngineBase(ABC):
     @abstractmethod
-    def preprocess(self, img: np.ndarray, target_size: int, verbose: bool = False, debug: bool = False) -> tuple[np.ndarray, float, int, int, float]:
+    def preprocess(self, img: np.ndarray, target_size: int, normalize: bool = False, verbose: bool = False, debug: bool = False) -> tuple[np.ndarray, float, int, int, float]:
         pass
     
     @abstractmethod
