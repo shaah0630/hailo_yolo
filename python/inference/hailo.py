@@ -3,12 +3,8 @@ import cv2
 import time
 from hailo_platform import HEF, VDevice, ConfigureParams, HailoStreamInterface, InferVStreams, InputVStreamParams, OutputVStreamParams, FormatType
 
-from inference.base import InferenceEngineBase
+from inference.base import ModelInputSize, InferenceEngineBase
 from utils import CvUtils
-from enum import IntEnum
-
-class ModelInputSize(IntEnum):
-    YOLO26 = 640
 
 def sigmoid(x: np.ndarray) -> np.ndarray:
     """Vectorized sigmoid"""
@@ -44,7 +40,7 @@ class HailoInferenceEngine(InferenceEngineBase):
 
         print(f"✓ Hailo engine initialized: {hef_path}")
     
-    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = False) -> tuple[np.ndarray, float, int, int]:
+    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = False, verbose: bool = False, debug: bool = False) -> tuple[np.ndarray, float, int, int, float]:
         """Load and preprocess image for inference
         
         Args:
@@ -55,6 +51,8 @@ class HailoInferenceEngine(InferenceEngineBase):
         Returns:
             (input_tensor, original_size, scale, pad_w, pad_h)
         """
+        t0 = time.perf_counter()
+
         # Convert color channel order
         # YOLO models expect RGB, but cv2.imread loads as BGR, so convert
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -67,69 +65,59 @@ class HailoInferenceEngine(InferenceEngineBase):
             input_tensor = np.expand_dims(resized, axis=0)
         else:
             input_tensor = np.expand_dims(resized, axis=0).astype(np.uint8)
+
+        t = time.perf_counter() - t0
         
-        return input_tensor, scale, pad_w, pad_h
+        return input_tensor, scale, pad_w, pad_h, t
     
-    def infer(self, input_data: np.ndarray, verbose: bool = False, save_output: bool = False, conf_threshold: float = 0.5) -> list[dict]:
-        """Run inference pipeline by Hailo NPU
+    def forward(self, input_data: np.ndarray, verbose: bool = False, debug: bool = False) -> tuple[list[dict], float]:
+        """Execute inference session via HailoRT
 
         Execute inference session via HailoRT.
         Decoding one-to-one head to detection bounding boxes will be handled in postprocess.
 
         Returns:
-            bboxes: Bounding boxes whose confidence scores are above threshold
+            dequantized_outputs: Logits output from HailoRT
         """
 
-        if verbose:
+        if debug:
             print(f"[INFERENCE] Input shape: {input_data.shape}, dtype: {input_data.dtype}")
-        
+
         with self.network_group.activate() as active_group:
             with InferVStreams(self.network_group, self.input_vstream_params, self.output_vstream_params) as infer_pipeline:
                 
                 # A. Hailo Backbone Inference
                 if verbose:
-                    print(f"[STAGE 1] Running Hailo backbone...")
-                #t_hailo = time.perf_counter()
+                    print(f"Running Hailo backbone...")
+                
+                t0 = time.perf_counter()
                 dequantized_outputs = infer_pipeline.infer(input_data)
                 
                 # DEBUG
-                #for name, tensor in hailo_output.items():
+                # for name, tensor in hailo_output.items():
                 #    print(f"{name}: {tensor.shape}");
 
-                #stats.hailo_inference_time = time.perf_counter() - t_hailo
-                #stats.hailo_output_shape = str({k: v.shape for k, v in hailo_results.items()})
+                t = time.perf_counter() - t0
                 #if verbose:
                 #    print(f"  ✓ Hailo inference: {stats.hailo_inference_time*1000:.2f}ms")
-
-                # B. Decode one-to-one head
-                if verbose:
-                   print(f"[STAGE 2] Decode one-to-one head...")
-                #t_post = time.perf_counter()
-                
-                bboxes = self._postprocess(dequantized_outputs, conf_threshold)
-                #stats.postprocess_time = time.perf_counter() - t_post
-                #stats.final_output_shape = f"{len(detections)} detections"
-                #if verbose:
-                #    print(f"  ✓ Python head: {stats.postprocess_time*1000:.2f}ms")
         
-        #stats.total_time = time.perf_counter() - t_start
-        
-        #if verbose:
-        #    print(f"[SUMMARY] Pipeline timing:")
-        #    print(f"  Hailo:   {stats.hailo_inference_time*1000:7.2f}ms")
-        #    print(f"  DecodeHead:  {stats.postprocess_time*1000:7.2f}ms")
-        #    print(f"  Total:   {stats.total_time*1000:7.2f}ms")
-        
-        return bboxes
+        return dequantized_outputs, t
     
-    def _postprocess(self, dequantized_results: dict, conf_threshold: float, multi_label: bool = True) -> list[dict]:
+    def postprocess(self, dequantized_results: dict, conf_threshold: float, verbose: bool = False, debug: bool = False, multi_label: bool = True) -> tuple[list[dict], float]:
         """Decode YOLO26 one-to-one head and filter the results by confidence score threshold
         
         Returns:
             bboxes: list[dict], (x1, y1, x2, y2, confidence, class)
         """
 
+        if verbose:
+            print(f"[Hailo] Decoding one-to-one head...")
+
+        t0 = time.perf_counter()
+
         # Map dequantized results to named tensors
+        # TODO: Redundant code for batch inference or inference for video stream
+        #       Only need to do once
         tensors = {}
         found_shapes = []
         for _, data in dequantized_results.items():
@@ -145,7 +133,7 @@ class HailoInferenceEngine(InferenceEngineBase):
         if missing:
             print(f"Error: Missing tensors from Hailo output: {missing}")
             print(f"Found shapes: {found_shapes}")
-            return []
+            return [], 0.0
         
         STRIDES = [8, 16, 32]
         GRID_DIMS = [80, 40, 20]
@@ -218,4 +206,6 @@ class HailoInferenceEngine(InferenceEngineBase):
                     'cls_id': int(class_ids[j]),    # Typecast to int for easier JSON dump
                 })
 
-        return bboxes
+        t = time.perf_counter() - t0
+
+        return bboxes, t

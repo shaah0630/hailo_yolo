@@ -3,13 +3,8 @@ import cv2
 import onnxruntime as ort
 import time
 
-from inference.base import InferenceEngineBase
+from inference.base import ModelInputSize, InferenceEngineBase
 from utils import CvUtils
-
-from enum import IntEnum
-
-class ModelInputSize(IntEnum):
-    YOLO26 = 640
 
 class OrtInferenceEngine(InferenceEngineBase):
     def __init__(self, onnx_path: str):
@@ -25,8 +20,10 @@ class OrtInferenceEngine(InferenceEngineBase):
         # print(f"DEBUG: input_name = {self.input_name}")
         # print(f"DEBUG: output_name = {self.output_name}")
 
-    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26, normalize: bool = True) -> tuple[np.ndarray, float, int, int]:
+    def preprocess(self, img_bgr: np.ndarray, target_size: int = ModelInputSize.YOLO26, verbose: bool = False, debug: bool = False, normalize: bool = True) -> tuple[np.ndarray, float, int, int, float]:
         """"""
+        t0 = time.perf_counter()
+
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         # Resize as a letterbox
         resized, scale, pad_w, pad_h = CvUtils.resize_letterbox(img_rgb, target_size)
@@ -37,34 +34,36 @@ class OrtInferenceEngine(InferenceEngineBase):
         # CHW -> NCHW
         input_tensor = np.expand_dims(input_tensor, axis=0)
 
-        return input_tensor, scale, pad_w, pad_h
+        t = time.perf_counter() - t0
+
+        return input_tensor, scale, pad_w, pad_h, t
     
-    def infer(self, input_data: np.ndarray, verbose: bool = False, save_output: bool = False, conf_threshold: float = 0.5) -> list[dict]:
+    def forward(self, input_data: np.ndarray, verbose: bool = False, debug: bool = False) -> tuple[list[dict], float]:
         if verbose:
-            print(f"[INFERENCE][STAGE 1] Run ORT inference session...")
+            print(f"Run ORT inference session...")
         t0 = time.perf_counter()
         outputs = self.session.run([self.output_name], {self.input_name: input_data})
-        t1 = time.perf_counter()
-        print(f"Inference time: {(t1 - t0)*1000:.2f}ms")
-
-        # DEBUG
-        # print(f"DEBUG: size of outputs = {len(outputs)}")
-        # print(f"DEBUG: outputs shape: {outputs[0].shape}")
-
-        # B. Just filter the results by input threshold
+        t = time.perf_counter() - t0
         if verbose:
-            print(f"[INFERENCE][STAGE 2] Generating bounding boxes...")
-        #t_post = time.perf_counter()
-        bboxes = self._postprocess(outputs, conf_threshold)
-        
-        return bboxes
+            print(f"Inference time: {t*1000:.2f}ms")
+
+        if debug:
+            print(f"Size of outputs = {len(outputs)}")
+            print(f"Outputs shape: {outputs[0].shape}")
+
+        return outputs, t
     
-    def _postprocess(self, dequantized_results: list, conf_threshold: float) -> list[dict]:
+    def postprocess(self, dequantized_results: list, conf_threshold: float, verbose: bool = False, debug: bool = False) -> tuple[list[dict], float]:
         """Filter the results by confidence score threshold
         
         Returns:
             bboxes: list[dict], (x1, y1, x2, y2, confidence, class)
         """
+        if verbose:
+            print(f"[ORT] Filter the detections...")
+
+        t0 = time.perf_counter()
+
         # As ORT should support all ops of YOLO
         # Output shape should be: [1, 300, 6] -> [x1, y1, x2, y2, conf, cls] in 640x640 letterboxed space
         raw_bboxes = dequantized_results[0][0]  # Shape [300, 6]
@@ -87,8 +86,8 @@ class OrtInferenceEngine(InferenceEngineBase):
                 'conf': round(float(conf), 4),
                 'cls_id': int(round(cls_id)),
             })
-            
-        print(f"Found {len(bboxes)} detections.")
+
+        t = time.perf_counter() - t0
 
         # Returned bounding boxes are still in 640x640 space
-        return bboxes
+        return bboxes, t
