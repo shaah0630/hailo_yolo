@@ -91,6 +91,7 @@ def image_object_detect(
     if debug:
         print(f"[DEBUG] Reversed to original aspect ratio:")
         print(_format_detection_results(results))
+        print(f"[DEBUG] {stats}")
 
     if verbose:
         print(f"✓ Inference completed in {stats.total * 1000:.2f}ms")
