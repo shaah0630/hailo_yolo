@@ -4,19 +4,18 @@
  * Single image detection with Hailo-8L + Post-processing in C++.
  * Usage: ./detect_image <image_path> [hef_path] [conf_threshold]
  */
-
-#include "hailo/hailort.hpp"
-#include "hailo/vdevice.hpp"
-#include "hailo/infer_model.hpp"
-#include "hailo/vstream.hpp"
-
-#include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
 #include <string>
 #include <chrono>
 #include <memory>
 #include <map>
+
+#include <opencv2/opencv.hpp>
+#include <hailo/hailort.hpp>
+#include <hailo/vdevice.hpp>
+#include <hailo/infer_model.hpp>
+#include <hailo/vstream.hpp>
 
 #include "postprocess.hpp"
 #include "preprocess.hpp"
@@ -55,6 +54,7 @@ int main(int argc, char** argv) {
 
     LetterboxInfo lb_info = letterbox_image(orig_image, TARGET_WIDTH, TARGET_HEIGHT);
     cv::Mat resized_image = lb_info.image;
+    // Convert color space from BGR to RGB
     cv::cvtColor(resized_image, resized_image, cv::COLOR_BGR2RGB);
 
     std::cout << "✓ Preprocessed to: (" << resized_image.rows << ", " << resized_image.cols << ", " << resized_image.channels() << ")" << std::endl;
@@ -95,17 +95,28 @@ int main(int argc, char** argv) {
     
     // Let's create params manually to force FLOAT32 on output
     auto input_vstream_params = network_group->make_input_vstream_params(false, HAILO_FORMAT_TYPE_UINT8, HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE);
-    if (!input_vstream_params) { print_error(input_vstream_params.status(), "Failed to make input params"); return 1; }
+    if (!input_vstream_params) {
+        print_error(input_vstream_params.status(), "Failed to make input params");
+        return 1;
+    }
     
     auto output_vstream_params = network_group->make_output_vstream_params(false, HAILO_FORMAT_TYPE_FLOAT32, HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE);
-    if (!output_vstream_params) { print_error(output_vstream_params.status(), "Failed to make output params"); return 1; }
+    if (!output_vstream_params) {
+        print_error(output_vstream_params.status(), "Failed to make output params");
+        return 1;
+    }
 
     auto input_vstreams_exp = VStreamsBuilder::create_input_vstreams(*network_group, input_vstream_params.value());
-    if (!input_vstreams_exp) { print_error(input_vstreams_exp.status(), "Failed to create input vstreams"); return 1; }
+    if (!input_vstreams_exp) {
+        print_error(input_vstreams_exp.status(), "Failed to create input vstreams");
+        return 1;
+    }
     auto input_vstreams = std::move(input_vstreams_exp.value());
 
     auto output_vstreams_exp = VStreamsBuilder::create_output_vstreams(*network_group, output_vstream_params.value());
-    if (!output_vstreams_exp) { print_error(output_vstreams_exp.status(), "Failed to create output vstreams"); return 1; }
+    if (!output_vstreams_exp) {print_error(output_vstreams_exp.status(), "Failed to create output vstreams");
+        return 1;
+    }
     auto output_vstreams = std::move(output_vstreams_exp.value());
 
     // 3. Inference
