@@ -17,6 +17,7 @@
 #include <hailo/infer_model.hpp>
 #include <hailo/vstream.hpp>
 
+#include "hailo.hpp"
 #include "postprocess.hpp"
 #include "preprocess.hpp"
 
@@ -26,19 +27,14 @@ using namespace hailort;
 constexpr int TARGET_WIDTH = 640;
 constexpr int TARGET_HEIGHT = 640;
 
-// Helper to print errors
-void print_error(hailo_status status, const std::string& msg) {
-    std::cerr << "Error: " << msg << " (Status: " << status << ")" << std::endl;
-}
-
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "Usage: ./detect_image <image_path> [hef_path] [conf_threshold]" << std::endl;
+        std::cerr << "Usage: ./detect_image <image_path> [model_path] [conf_threshold]" << std::endl;
         return 1;
     }
 
     std::string image_path = argv[1];
-    std::string hef_path = (argc > 2) ? argv[2] : "../models/yolo26n.hef";
+    std::string model_path = (argc > 2) ? argv[2] : "../models/yolo26n.hef";
     float conf_threshold = (argc > 3) ? std::stof(argv[3]) : 0.25f;
 
     std::cout << "[Loading image: " << image_path << "]" << std::endl;
@@ -59,109 +55,19 @@ int main(int argc, char** argv) {
 
     std::cout << "✓ Preprocessed to: (" << resized_image.rows << ", " << resized_image.cols << ", " << resized_image.channels() << ")" << std::endl;
 
-    // 2. Setup Hailo
-    auto vdevice_exp = VDevice::create();
-    if (!vdevice_exp) {
-        print_error(vdevice_exp.status(), "Failed to create VDevice");
-        return 1;
+    // 2. Setup inference engine
+    auto inf_eng = std::make_unique<HailoInferenceEngine>();
+    if (inf_eng->init(model_path) != 0) {
+        std::cout << "Failed to initialize inference engine: " << "!" << std::endl;
+        return -1;
     }
-    auto vdevice = std::move(vdevice_exp.value());
-
-    auto hef_exp = Hef::create(hef_path);
-    if (!hef_exp) {
-        print_error(hef_exp.status(), "Failed to load HEF");
-        return 1;
-    }
-    auto hef = std::move(hef_exp.value());
-
-    auto configure_params_exp = vdevice->create_configure_params(hef);
-    if (!configure_params_exp) {
-        print_error(configure_params_exp.status(), "Failed to create configure params");
-        return 1;
-    }
-    auto configure_params = configure_params_exp.value();
-
-    auto network_groups_exp = vdevice->configure(hef, configure_params);
-    if (!network_groups_exp) {
-        print_error(network_groups_exp.status(), "Failed to configure network group");
-        return 1;
-    }
-    auto network_groups = std::move(network_groups_exp.value());
-    auto network_group = network_groups[0];
-
-    // Create VStreams
-    // Input: UINT8, NHWC/Auto (Matches image)
-    // Output: FLOAT32 (Matches requirement for automatic dequantization)
-    
-    // Let's create params manually to force FLOAT32 on output
-    auto input_vstream_params = network_group->make_input_vstream_params(false, HAILO_FORMAT_TYPE_UINT8, HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE);
-    if (!input_vstream_params) {
-        print_error(input_vstream_params.status(), "Failed to make input params");
-        return 1;
-    }
-    
-    auto output_vstream_params = network_group->make_output_vstream_params(false, HAILO_FORMAT_TYPE_FLOAT32, HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE);
-    if (!output_vstream_params) {
-        print_error(output_vstream_params.status(), "Failed to make output params");
-        return 1;
-    }
-
-    auto input_vstreams_exp = VStreamsBuilder::create_input_vstreams(*network_group, input_vstream_params.value());
-    if (!input_vstreams_exp) {
-        print_error(input_vstreams_exp.status(), "Failed to create input vstreams");
-        return 1;
-    }
-    auto input_vstreams = std::move(input_vstreams_exp.value());
-
-    auto output_vstreams_exp = VStreamsBuilder::create_output_vstreams(*network_group, output_vstream_params.value());
-    if (!output_vstreams_exp) {print_error(output_vstreams_exp.status(), "Failed to create output vstreams");
-        return 1;
-    }
-    auto output_vstreams = std::move(output_vstreams_exp.value());
 
     // 3. Inference
     std::cout << "[Running inference...]" << std::endl;
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    // Send Input
-    // Assuming single input
-    if (input_vstreams.size() != 1) {
-        std::cerr << "Error: Expected 1 input stream, got " << input_vstreams.size() << std::endl;
-        return 1;
-    }
-    
-    hailo_status status = input_vstreams[0].write(MemoryView(resized_image.data, resized_image.total() * resized_image.elemSize()));
-    if (status != HAILO_SUCCESS) {
-        print_error(status, "Failed to write input");
-        return 1;
-    }
+    std::map<std::string, std::vector<float>> output_data = inf_eng->forward(resized_image.data, resized_image.total() * resized_image.elemSize());
 
-    // Read Outputs
-    // We expect cls_80, cls_40, cls_20, and reg.
-    // We need to map them by name.
-    
-    std::map<std::string, std::vector<float>> output_data;
-    
-    for (auto& output_vstream : output_vstreams) {
-        std::string name = output_vstream.name(); // This is the vstream name
-        
-        // The VStream names might be slightly different from the python dictionary keys if python remapped them.
-        // In common.py: shape_to_name map was used for Python...
-        // But here we might get raw names from HEF.
-        // We will read the data and try to identify by shape later or hope names make sense.
-        
-        size_t framesize = output_vstream.get_frame_size();
-        std::vector<float> buffer(framesize / sizeof(float)); // Since we requested FLOAT32
-        
-        status = output_vstream.read(MemoryView(buffer.data(), framesize));
-        if (status != HAILO_SUCCESS) {
-            print_error(status, "Failed to read output " + name);
-            return 1;
-        }
-        
-        output_data[name] = std::move(buffer);
-    }
-    
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end_time - start_time;
     std::cout << "✓ Inference completed in " << duration.count() << "ms" << std::endl;
